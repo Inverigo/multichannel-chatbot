@@ -265,8 +265,8 @@ class CentralServer {
       this.app.use('/facebook', this.facebookService.getRouter());
       
       // Инициализация WhatsApp
-      await this.whatsappService.initialize();
-      console.log('✅ WhatsApp клиент инициализирован');
+      //await this.whatsappService.initialize();
+      //console.log('✅ WhatsApp клиент инициализирован');
       
       // Инициализация Telegram канала
       await TelegramChannelService.initialize();
@@ -290,4 +290,5 @@ class CentralServer {
 
 // Запуск сервера
 const server = new CentralServer();
+
 server.start();
