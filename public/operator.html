@@ -1,0 +1,625 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Панель оператора - Zizu Chatbot</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #f5f5f5;
+            height: 100vh;
+            display: flex;
+        }
+
+        .sidebar {
+            width: 300px;
+            background: white;
+            border-right: 1px solid #e0e0e0;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .sidebar-header {
+            padding: 20px;
+            background: #0b5a34;
+            color: white;
+        }
+
+        .sidebar-header h1 {
+            font-size: 18px;
+            margin-bottom: 5px;
+        }
+
+        .sidebar-header p {
+            font-size: 12px;
+            opacity: 0.8;
+        }
+
+        .connection-status {
+            margin-top: 10px;
+            display: flex;
+            align-items: center;
+            font-size: 12px;
+        }
+
+        .status-indicator {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #4caf50;
+            margin-right: 8px;
+        }
+
+        .status-indicator.offline {
+            background: #f44336;
+        }
+
+        .stats {
+            padding: 10px 20px;
+            background: #f8f8f8;
+            border-bottom: 1px solid #e0e0e0;
+            font-size: 12px;
+            color: #666;
+        }
+
+        .sessions-list {
+            flex: 1;
+            overflow-y: auto;
+        }
+
+        .session-item {
+            padding: 15px 20px;
+            border-bottom: 1px solid #f0f0f0;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .session-item:hover {
+            background: #f8f8f8;
+        }
+
+        .session-item.active {
+            background: #e8f5e8;
+            border-left: 3px solid #0b5a34;
+        }
+
+        .session-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 5px;
+        }
+
+        .session-name {
+            font-weight: 600;
+            color: #333;
+        }
+
+        .session-channel {
+            background: #0b5a34;
+            color: white;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 10px;
+            text-transform: uppercase;
+        }
+
+        .session-preview {
+            font-size: 12px;
+            color: #666;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .session-time {
+            font-size: 10px;
+            color: #999;
+            margin-top: 3px;
+        }
+
+        .main-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .chat-header {
+            background: white;
+            padding: 20px;
+            border-bottom: 1px solid #e0e0e0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .chat-info h2 {
+            font-size: 16px;
+            color: #333;
+        }
+
+        .chat-info p {
+            font-size: 12px;
+            color: #666;
+        }
+
+        .chat-controls {
+            display: flex;
+            gap: 10px;
+        }
+
+        .btn {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            transition: background 0.2s;
+        }
+
+        .btn-primary {
+            background: #0b5a34;
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: #0d7a45;
+        }
+
+        .btn-secondary {
+            background: #f0f0f0;
+            color: #333;
+        }
+
+        .btn-secondary:hover {
+            background: #e0e0e0;
+        }
+
+        .messages-container {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+            background: #fafafa;
+        }
+
+        .message {
+            margin-bottom: 15px;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .message.user {
+            align-items: flex-end;
+        }
+
+        .message.bot, .message.operator {
+            align-items: flex-start;
+        }
+
+        .message-bubble {
+            max-width: 70%;
+            padding: 10px 15px;
+            border-radius: 18px;
+            font-size: 14px;
+            line-height: 1.4;
+        }
+
+        .message.user .message-bubble {
+            background: #0b5a34;
+            color: white;
+        }
+
+        .message.bot .message-bubble {
+            background: #e8f5e8;
+            color: #333;
+        }
+
+        .message.operator .message-bubble {
+            background: #fff3cd;
+            color: #333;
+            border: 1px solid #ffeaa7;
+        }
+
+        .message-time {
+            font-size: 10px;
+            color: #999;
+            margin-top: 5px;
+        }
+
+        .input-area {
+            background: white;
+            padding: 20px;
+            border-top: 1px solid #e0e0e0;
+            display: flex;
+            gap: 10px;
+        }
+
+        .message-input {
+            flex: 1;
+            padding: 12px;
+            border: 1px solid #e0e0e0;
+            border-radius: 20px;
+            font-size: 14px;
+            outline: none;
+        }
+
+        .message-input:focus {
+            border-color: #0b5a34;
+        }
+
+        .send-btn {
+            padding: 12px 20px;
+            background: #0b5a34;
+            color: white;
+            border: none;
+            border-radius: 20px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+
+        .send-btn:hover {
+            background: #0d7a45;
+        }
+
+        .send-btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+
+        .no-session {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            color: #666;
+            font-size: 16px;
+        }
+    </style>
+</head>
+<body>
+    <div class="sidebar">
+        <div class="sidebar-header">
+            <h1>🏠 Zizu Real Estate</h1>
+            <p>Multi-language Chatbot Operator Panel</p>
+            <div class="connection-status">
+                <span class="status-indicator" id="connectionStatus"></span>
+                <span id="connectionText">Connected</span>
+            </div>
+        </div>
+        
+        <div class="stats" id="stats">
+            Active sessions: 0
+        </div>
+        
+        <div class="sessions-list" id="sessionsList">
+            <div style="padding: 20px; text-align: center; color: #666;">
+                No active sessions
+            </div>
+        </div>
+    </div>
+
+    <div class="main-content">
+        <div id="noSession" class="no-session">
+            <div style="text-align: center;">
+                <h2>👋 Welcome!</h2>
+                <p>Select a session to start working</p>
+            </div>
+        </div>
+
+        <div id="chatArea" style="display: none;">
+            <div class="chat-header">
+                <div class="chat-info">
+                    <h2 id="chatUserName">User Name</h2>
+                    <p id="chatUserInfo">User Information</p>
+                </div>
+                <div class="chat-controls">
+                    <button class="btn btn-secondary" id="returnToBotBtn">🤖 Return to Bot</button>
+                    <button class="btn btn-primary" id="takeOverBtn">👤 Take Over</button>
+                </div>
+            </div>
+
+            <div class="messages-container" id="messagesContainer">
+                <!-- Messages will be added dynamically -->
+            </div>
+
+            <div class="input-area">
+                <input type="text" class="message-input" id="messageInput" placeholder="Type a message...">
+                <button class="btn send-btn" id="sendBtn">�� Send</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        class OperatorPanel {
+            constructor() {
+                this.socket = io();
+                this.currentSession = null;
+                this.sessions = new Map();
+                
+                this.setupEventListeners();
+                this.setupSocketEvents();
+            }
+
+            setupEventListeners() {
+                document.getElementById('sendBtn').addEventListener('click', () => {
+                    this.sendMessage();
+                });
+
+                document.getElementById('messageInput').addEventListener('keypress', (e) => {
+                    if (e.key === 'Enter') {
+                        this.sendMessage();
+                    }
+                });
+
+                document.getElementById('takeOverBtn').addEventListener('click', () => {
+                    this.takeOverSession();
+                });
+
+                document.getElementById('returnToBotBtn').addEventListener('click', () => {
+                    this.returnToBot();
+                });
+            }
+
+            setupSocketEvents() {
+                this.socket.on('connect', () => {
+                    this.updateConnectionStatus(true);
+                    console.log('✅ Connected to server');
+                });
+
+                this.socket.on('disconnect', () => {
+                    this.updateConnectionStatus(false);
+                    console.log('❌ Disconnected from server');
+                });
+
+                this.socket.on('sessionsUpdate', (sessions) => {
+                    console.log('📋 Sessions update:', sessions.length);
+                    this.updateSessionsList(sessions);
+                });
+
+                this.socket.on('newMessage', (data) => {
+                    console.log('💬 New message:', data);
+                    this.handleNewMessage(data);
+                });
+
+                this.socket.on('sessionTakenOver', (data) => {
+                    console.log('👤 Session taken over:', data.sessionId);
+                    this.updateSessionStatus(data.sessionId, true);
+                });
+
+                this.socket.on('sessionReturnedToBot', (data) => {
+                    console.log('🤖 Session returned to bot:', data.sessionId);
+                    this.updateSessionStatus(data.sessionId, false);
+                });
+            }
+
+            updateConnectionStatus(connected) {
+                const status = document.getElementById('connectionStatus');
+                const text = document.getElementById('connectionText');
+                
+                if (connected) {
+                    status.classList.remove('offline');
+                    text.textContent = 'Connected';
+                } else {
+                    status.classList.add('offline');
+                    text.textContent = 'Disconnected';
+                }
+            }
+
+            updateSessionsList(sessions) {
+                this.sessions.clear();
+                sessions.forEach(([id, session]) => {
+                    this.sessions.set(id, session);
+                });
+                this.renderSessionsList();
+                this.updateStats();
+            }
+
+            updateStats() {
+                const stats = document.getElementById('stats');
+                stats.textContent = `Active sessions: ${this.sessions.size}`;
+            }
+
+            renderSessionsList() {
+                const container = document.getElementById('sessionsList');
+                container.innerHTML = '';
+
+                if (this.sessions.size === 0) {
+                    container.innerHTML = '<div style="padding: 20px; text-align: center; color: #666;">No active sessions</div>';
+                    return;
+                }
+
+                this.sessions.forEach((session, id) => {
+                    const sessionElement = this.createSessionElement(id, session);
+                    container.appendChild(sessionElement);
+                });
+            }
+
+            createSessionElement(id, session) {
+                const div = document.createElement('div');
+                div.className = 'session-item';
+                div.dataset.sessionId = id;
+
+                const lastMessage = session.messages[session.messages.length - 1];
+                const timeAgo = this.getTimeAgo(session.lastActivity);
+
+                div.innerHTML = `
+                    <div class="session-header">
+                        <span class="session-name">${session.userInfo.name || 'User'}</span>
+                        <span class="session-channel">${session.channel}</span>
+                    </div>
+                    <div class="session-preview">${lastMessage ? lastMessage.text : 'No messages'}</div>
+                    <div class="session-time">${timeAgo}</div>
+                `;
+
+                div.addEventListener('click', () => {
+                    this.selectSession(id);
+                });
+
+                return div;
+            }
+
+            selectSession(sessionId) {
+                // Remove active class from previous session
+                document.querySelectorAll('.session-item').forEach(item => {
+                    item.classList.remove('active');
+                });
+
+                // Add active class to selected session
+                const selectedItem = document.querySelector(`[data-session-id="${sessionId}"]`);
+                if (selectedItem) {
+                    selectedItem.classList.add('active');
+                }
+
+                this.currentSession = sessionId;
+                this.showChatArea();
+                this.loadSessionMessages(sessionId);
+            }
+
+            showChatArea() {
+                document.getElementById('noSession').style.display = 'none';
+                document.getElementById('chatArea').style.display = 'flex';
+                
+                const session = this.sessions.get(this.currentSession);
+                if (session) {
+                    document.getElementById('chatUserName').textContent = session.userInfo.name || 'User';
+                    document.getElementById('chatUserInfo').textContent = 
+                        `${session.channel.toUpperCase()} • ${this.getTimeAgo(session.lastActivity)}`;
+                }
+            }
+
+            loadSessionMessages(sessionId) {
+                const container = document.getElementById('messagesContainer');
+                container.innerHTML = '';
+
+                const session = this.sessions.get(sessionId);
+                if (session && session.messages) {
+                    session.messages.forEach(message => {
+                        this.addMessageToChat(message);
+                    });
+                    this.scrollToBottom();
+                }
+            }
+
+            handleNewMessage(data) {
+                const { sessionId, message, userInfo } = data;
+                
+                // Update session
+                if (this.sessions.has(sessionId)) {
+                    const session = this.sessions.get(sessionId);
+                    session.messages.push({
+                        from: 'user',
+                        text: message,
+                        timestamp: Date.now()
+                    });
+                    session.lastActivity = Date.now();
+                }
+
+                // If this is current session, add message to chat
+                if (sessionId === this.currentSession) {
+                    this.addMessageToChat({
+                        from: 'user',
+                        text: message,
+                        timestamp: Date.now()
+                    });
+                    this.scrollToBottom();
+                }
+
+                // Update sessions list
+                this.renderSessionsList();
+            }
+
+            addMessageToChat(message) {
+                const container = document.getElementById('messagesContainer');
+                const messageDiv = document.createElement('div');
+                messageDiv.className = `message ${message.from}`;
+
+                const time = new Date(message.timestamp).toLocaleTimeString('en-US', {
+                    hour: '2-digit',
+                    minute: '2-digit'
+                });
+
+                messageDiv.innerHTML = `
+                    <div class="message-bubble">${message.text}</div>
+                    <div class="message-time">${time}</div>
+                `;
+
+                container.appendChild(messageDiv);
+            }
+
+            sendMessage() {
+                const input = document.getElementById('messageInput');
+                const message = input.value.trim();
+
+                if (message && this.currentSession) {
+                    this.socket.emit('operatorMessage', {
+                        sessionId: this.currentSession,
+                        message: message
+                    });
+
+                    // Add message to chat
+                    this.addMessageToChat({
+                        from: 'operator',
+                        text: message,
+                        timestamp: Date.now()
+                    });
+
+                    input.value = '';
+                    this.scrollToBottom();
+                }
+            }
+
+            takeOverSession() {
+                if (this.currentSession) {
+                    this.socket.emit('operatorTakeOver', this.currentSession);
+                    document.getElementById('takeOverBtn').textContent = '✅ Active';
+                    document.getElementById('takeOverBtn').disabled = true;
+                }
+            }
+
+            returnToBot() {
+                if (this.currentSession) {
+                    this.socket.emit('returnToBot', this.currentSession);
+                    document.getElementById('takeOverBtn').textContent = '👤 Take Over';
+                    document.getElementById('takeOverBtn').disabled = false;
+                }
+            }
+
+            updateSessionStatus(sessionId, isOperatorActive) {
+                if (this.sessions.has(sessionId)) {
+                    const session = this.sessions.get(sessionId);
+                    session.isOperatorActive = isOperatorActive;
+                }
+            }
+
+            scrollToBottom() {
+                const container = document.getElementById('messagesContainer');
+                container.scrollTop = container.scrollHeight;
+            }
+
+            getTimeAgo(timestamp) {
+                const now = Date.now();
+                const diff = now - timestamp;
+                const minutes = Math.floor(diff / 60000);
+                const hours = Math.floor(diff / 3600000);
+                const days = Math.floor(diff / 86400000);
+
+                if (minutes < 1) return 'just now';
+                if (minutes < 60) return `${minutes}m ago`;
+                if (hours < 24) return `${hours}h ago`;
+                return `${days}d ago`;
+            }
+        }
+
+        // Initialize panel
+        new OperatorPanel();
+    </script>
+</body>
+</html>

@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Zizu Real Estate Chat</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #f4efe3;
+            height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .chat-container {
+            width: 400px;
+            height: 600px;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .chat-header {
+            background: #0b5a34;
+            color: white;
+            padding: 20px;
+            text-align: center;
+        }
+
+        .chat-header h1 {
+            font-size: 18px;
+            margin-bottom: 5px;
+        }
+
+        .chat-header p {
+            font-size: 12px;
+            opacity: 0.8;
+        }
+
+        .messages {
+            flex: 1;
+            padding: 20px;
+            overflow-y: auto;
+            background: #fafafa;
+        }
+
+        .message {
+            margin-bottom: 15px;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .message.user {
+            align-items: flex-end;
+        }
+
+        .message.bot {
+            align-items: flex-start;
+        }
+
+        .message-bubble {
+            max-width: 80%;
+            padding: 12px 16px;
+            border-radius: 18px;
+            font-size: 14px;
+            line-height: 1.4;
+        }
+
+        .message.user .message-bubble {
+            background: #0b5a34;
+            color: white;
+        }
+
+        .message.bot .message-bubble {
+            background: #e8f5e8;
+            color: #333;
+        }
+
+        .input-area {
+            padding: 20px;
+            background: white;
+            border-top: 1px solid #e0e0e0;
+            display: flex;
+            gap: 10px;
+        }
+
+        .message-input {
+            flex: 1;
+            padding: 12px;
+            border: 1px solid #e0e0e0;
+            border-radius: 20px;
+            font-size: 14px;
+            outline: none;
+        }
+
+        .message-input:focus {
+            border-color: #0b5a34;
+        }
+
+        .send-btn {
+            padding: 12px 20px;
+            background: #0b5a34;
+            color: white;
+            border: none;
+            border-radius: 20px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+
+        .send-btn:hover {
+            background: #0d7a45;
+        }
+
+        .send-btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+    </style>
+</head>
+<body>
+    <div class="chat-container">
+        <div class="chat-header">
+            <h1>🏠 Zizu Real Estate</h1>
+            <p>Your real estate assistant in Hurghada</p>
+        </div>
+
+        <div class="messages" id="messages">
+            <div class="message bot">
+                <div class="message-bubble">
+                    Hello! �� I'm Zizu, your real estate assistant in Hurghada. I can help you find apartments, villas, and rental properties. How can I assist you today?
+                </div>
+            </div>
+        </div>
+
+        <div class="input-area">
+            <input type="text" class="message-input" id="messageInput" placeholder="Type a message...">
+            <button class="btn send-btn" id="sendBtn">��</button>
+        </div>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        class WebChat {
+            constructor() {
+                this.socket = io();
+                this.userId = 'web_' + Date.now();
+                this.messages = document.getElementById('messages');
+                this.messageInput = document.getElementById('messageInput');
+                this.sendBtn = document.getElementById('sendBtn');
+                
+                this.setupEventListeners();
+                this.setupSocketEvents();
+            }
+
+            setupEventListeners() {
+                this.sendBtn.addEventListener('click', () => {
+                    this.sendMessage();
+                });
+
+                this.messageInput.addEventListener('keypress', (e) => {
+                    if (e.key === 'Enter') {
+                        this.sendMessage();
+                    }
+                });
+            }
+
+            setupSocketEvents() {
+                this.socket.on('connect', () => {
+                    console.log('✅ Connected to server');
+                });
+
+                this.socket.on('webMessage', (data) => {
+                    if (data.userId === this.userId) {
+                        this.addMessage(data.message, 'bot');
+                    }
+                });
+            }
+
+            sendMessage() {
+                const message = this.messageInput.value.trim();
+                if (message) {
+                    this.addMessage(message, 'user');
+                    this.messageInput.value = '';
+                    
+                    // Send message to server
+                    this.socket.emit('incomingMessage', {
+                        channel: 'web',
+                        userId: this.userId,
+                        message: message,
+                        userInfo: {
+                            name: 'Web User',
+                            id: this.userId
+                        },
+                        timestamp: Date.now()
+                    });
+                }
+            }
+
+            addMessage(text, from) {
+                const messageDiv = document.createElement('div');
+                messageDiv.className = `message ${from}`;
+                
+                const bubble = document.createElement('div');
+                bubble.className = 'message-bubble';
+                bubble.textContent = text;
+                
+                messageDiv.appendChild(bubble);
+                this.messages.appendChild(messageDiv);
+                
+                this.scrollToBottom();
+            }
+
+            scrollToBottom() {
+                this.messages.scrollTop = this.messages.scrollHeight;
+            }
+        }
+
+        // Initialize chat
+        new WebChat();
+    </script>
+</body>
+</html>
