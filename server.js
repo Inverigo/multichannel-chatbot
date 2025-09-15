@@ -1,294 +1,290 @@
 const express = require('express');
 const http = require('http');
 const socketIo = require('socket.io');
-const cors = require('cors');
 const path = require('path');
-require('dotenv').config();
+const sqlite3 = require('sqlite3').verbose();
 
 // Импорт наших сервисов
-//const TelegramService = require('./src/telegram');
+const TelegramService = require('./src/telegram');
 const WhatsAppService = require('./src/whatsapp');
 const FacebookService = require('./src/facebook');
-const DatabaseService = require('./src/database');
 const ChatbotService = require('./src/chatbot');
+const DatabaseService = require('./src/database');
 const TelegramChannelService = require('./src/telegram-channel');
 
-class CentralServer {
-  constructor() {
-    this.app = express();
-    this.server = http.createServer(this.app);
-    this.io = socketIo(this.server, {
-      cors: {
-        origin: "*",
-        methods: ["GET", "POST"]
-      }
-    });
-    
-    this.activeSessions = new Map();
-    this.operators = new Set();
-    
-    this.setupMiddleware();
-    this.setupRoutes();
-    this.setupSocket();
-    this.initializeServices();
-  }
-
-  setupMiddleware() {
-    this.app.use(cors());
-    this.app.use(express.json());
-    this.app.use(express.static(path.join(__dirname, 'public')));
-  }
-
-  setupRoutes() {
-    // Главная страница
-    this.app.get('/', (req, res) => {
-      res.redirect('/operator');
-    });
-
-    // API для получения статистики
-    this.app.get('/api/stats', (req, res) => {
-      res.json({
-        activeSessions: this.activeSessions.size,
-        channels: {
-          whatsapp: Array.from(this.activeSessions.values()).filter(s => s.channel === 'whatsapp').length,
-          telegram: Array.from(this.activeSessions.values()).filter(s => s.channel === 'telegram').length,
-          facebook: Array.from(this.activeSessions.values()).filter(s => s.channel === 'facebook').length,
-          web: Array.from(this.activeSessions.values()).filter(s => s.channel === 'web').length
-        }
-      });
-    });
-
-    // API для получения активных сессий
-    this.app.get('/api/sessions', (req, res) => {
-      const sessions = Array.from(this.activeSessions.entries()).map(([id, session]) => ({
-        id,
-        ...session,
-        lastMessage: session.messages[session.messages.length - 1]
-      }));
-      res.json(sessions);
-    });
-
-    // API для получения объявлений
-    this.app.get('/api/properties', async (req, res) => {
-      try {
-        const { type, rooms, price_min, price_max } = req.query;
-        const properties = await TelegramChannelService.getProperties({ type, rooms, price_min, price_max });
-        res.json(properties);
-      } catch (error) {
-        console.error('Ошибка получения объявлений:', error);
-        res.status(500).json({ error: 'Ошибка получения объявлений' });
-      }
-    });
-  }
-
-  setupSocket() {
-    this.io.on('connection', (socket) => {
-      console.log('Оператор подключился:', socket.id);
-      this.operators.add(socket.id);
-
-      // Отправляем текущие сессии новому оператору
-      socket.emit('sessionsUpdate', Array.from(this.activeSessions.entries()));
-
-      // Обработка входящих сообщений
-      socket.on('incomingMessage', (data) => {
-        this.handleIncomingMessage(data);
-      });
-
-      // Оператор берет сессию
-      socket.on('operatorTakeOver', (sessionId) => {
-        this.operatorTakeOver(sessionId, socket.id);
-      });
-
-      // Сообщение от оператора
-      socket.on('operatorMessage', (data) => {
-        this.sendOperatorMessage(data);
-      });
-
-      // Возврат к боту
-      socket.on('returnToBot', (sessionId) => {
-        this.returnToBot(sessionId);
-      });
-
-      socket.on('disconnect', () => {
-        console.log('Оператор отключился:', socket.id);
-        this.operators.delete(socket.id);
-      });
-    });
-
-    // Делаем io доступным глобально для сервисов
-    global.io = this.io;
-  }
-
-  async handleIncomingMessage(data) {
-    const { channel, userId, message, userInfo } = data;
-    const sessionId = `${channel}_${userId}`;
-
-    console.log(`Новое сообщение из ${channel}:`, message);
-
-    // Создаем или обновляем сессию
-    if (!this.activeSessions.has(sessionId)) {
-      this.activeSessions.set(sessionId, {
-        channel,
-        userId,
-        userInfo,
-        isOperatorActive: false,
-        operatorId: null,
-        messages: [],
-        createdAt: Date.now(),
-        lastActivity: Date.now()
-      });
-    }
-
-    const session = this.activeSessions.get(sessionId);
-    session.messages.push({
-      from: 'user',
-      text: message,
-      timestamp: Date.now()
-    });
-    session.lastActivity = Date.now();
-
-    // Сохраняем в базу данных
-    try {
-      await DatabaseService.saveMessage(sessionId, 'user', message);
-    } catch (error) {
-      console.error('Ошибка сохранения в БД:', error);
-    }
-
-    // Если оператор не активен - отвечает бот
-    if (!session.isOperatorActive) {
-      try {
-        const botResponse = await ChatbotService.processMessage(message, sessionId);
-        await this.sendToChannel(channel, userId, botResponse);
+class MultichannelChatbot {
+    constructor() {
+        this.app = express();
+        this.server = http.createServer(this.app);
+        this.io = socketIo(this.server, {
+            cors: {
+                origin: "*",
+                methods: ["GET", "POST"]
+            }
+        });
         
-        session.messages.push({
-          from: 'bot',
-          text: botResponse,
-          timestamp: Date.now()
+        this.port = process.env.PORT || 3000;
+        this.sessions = new Map();
+        
+        this.setupMiddleware();
+        this.setupRoutes();
+        this.setupSocketHandlers();
+    }
+
+    setupMiddleware() {
+        this.app.use(express.json());
+        this.app.use(express.static('public'));
+    }
+
+    setupRoutes() {
+        // Главная страница
+        this.app.get('/', (req, res) => {
+            res.sendFile(path.join(__dirname, 'public', 'webchat.html'));
         });
 
-        await DatabaseService.saveMessage(sessionId, 'bot', botResponse);
-      } catch (error) {
-        console.error('Ошибка обработки ботом:', error);
-        const fallbackResponse = 'Sorry, an error occurred. Please try again.';
-        await this.sendToChannel(channel, userId, fallbackResponse);
-      }
+        // Маршруты для HTML страниц
+        this.app.get('/operator', (req, res) => {
+            res.sendFile(path.join(__dirname, 'public', 'operator.html'));
+        });
+
+        this.app.get('/webchat', (req, res) => {
+            res.sendFile(path.join(__dirname, 'public', 'webchat.html'));
+        });
+
+        // API маршруты
+        this.app.post('/api/chat', async (req, res) => {
+            try {
+                const { message, sessionId } = req.body;
+                const response = await this.handleMessage(message, sessionId);
+                res.json({ response, sessionId });
+            } catch (error) {
+                console.error('Ошибка обработки сообщения:', error);
+                res.status(500).json({ error: 'Internal server error' });
+            }
+        });
+
+        this.app.post('/api/lead', async (req, res) => {
+            try {
+                const { name, phone, email, message } = req.body;
+                // Здесь можно добавить логику сохранения лида
+                console.log('Новый лид:', { name, phone, email, message });
+                res.json({ success: true });
+            } catch (error) {
+                console.error('Ошибка сохранения лида:', error);
+                res.status(500).json({ error: 'Internal server error' });
+            }
+        });
+
+        // Webhook для Facebook
+        this.app.get('/webhook', (req, res) => {
+            const VERIFY_TOKEN = process.env.FACEBOOK_VERIFY_TOKEN;
+            const mode = req.query['hub.mode'];
+            const token = req.query['hub.verify_token'];
+            const challenge = req.query['hub.challenge'];
+
+            if (mode && token) {
+                if (mode === 'subscribe' && token === VERIFY_TOKEN) {
+                    console.log('Facebook webhook verified');
+                    res.status(200).send(challenge);
+                } else {
+                    res.sendStatus(403);
+                }
+            }
+        });
+
+        this.app.post('/webhook', (req, res) => {
+            const body = req.body;
+
+            if (body.object === 'page') {
+                body.entry.forEach(entry => {
+                    const webhookEvent = entry.messaging[0];
+                    console.log('Facebook webhook event:', webhookEvent);
+                    
+                    if (webhookEvent.message) {
+                        this.handleFacebookMessage(webhookEvent);
+                    }
+                });
+
+                res.status(200).send('EVENT_RECEIVED');
+            } else {
+                res.sendStatus(404);
+            }
+        });
     }
 
-    // Уведомляем всех операторов
-    this.io.emit('newMessage', {
-      sessionId,
-      channel,
-      userId,
-      message,
-      userInfo,
-      timestamp: Date.now()
-    });
-  }
+    setupSocketHandlers() {
+        this.io.on('connection', (socket) => {
+            console.log('Новое подключение:', socket.id);
 
-  async sendToChannel(channel, userId, message) {
-    console.log(`Отправка в ${channel}:`, message);
-    
-    switch (channel) {
-      case 'whatsapp':
-        return await this.whatsappService.sendMessage(userId, message);
-      case 'telegram':
-  	console.log('Telegram отключен временно');
- 	 return true;
-        //return await this.telegramService.sendMessage(userId, message);
-      case 'facebook':
-        return await this.facebookService.sendMessage(userId, message);
-      case 'web':
-        return this.io.emit('webMessage', { userId, message });
+            // Обработка сообщений от пользователей
+            socket.on('user-message', async (data) => {
+                try {
+                    const { message, sessionId } = data;
+                    const response = await this.handleMessage(message, sessionId || socket.id);
+                    
+                    socket.emit('bot-response', {
+                        message: response,
+                        sessionId: sessionId || socket.id
+                    });
+                } catch (error) {
+                    console.error('Ошибка обработки сообщения:', error);
+                    socket.emit('error', { message: 'Произошла ошибка' });
+                }
+            });
+
+            // Обработка сообщений от оператора
+            socket.on('operator-message', async (data) => {
+                try {
+                    const { message, sessionId } = data;
+                    await this.sendToChannel('web', sessionId, message, 'operator');
+                    
+                    // Отправляем сообщение пользователю
+                    socket.to(sessionId).emit('operator-response', {
+                        message: message,
+                        sender: 'operator'
+                    });
+                } catch (error) {
+                    console.error('Ошибка отправки сообщения оператора:', error);
+                }
+            });
+
+            // Отключение
+            socket.on('disconnect', () => {
+                console.log('Пользователь отключился:', socket.id);
+            });
+        });
     }
-  }
 
-  operatorTakeOver(sessionId) {
-    const session = this.activeSessions.get(sessionId);
-    if (session) {
-      session.isOperatorActive = true;
-      this.io.emit('sessionTakenOver', { sessionId });
-      console.log(`Оператор взял сессию: ${sessionId}`);
+    async handleMessage(message, sessionId) {
+        console.log(`Обработка сообщения: "${message}" от сессии: ${sessionId}`);
+        
+        // Получаем или создаем сессию
+        if (!this.sessions.has(sessionId)) {
+            this.sessions.set(sessionId, {
+                id: sessionId,
+                messages: [],
+                userInfo: {},
+                channel: 'web',
+                isActive: true,
+                lastActivity: new Date()
+            });
+        }
+
+        const session = this.sessions.get(sessionId);
+        session.messages.push({
+            text: message,
+            sender: 'user',
+            timestamp: new Date()
+        });
+        session.lastActivity = new Date();
+
+        // Обрабатываем сообщение через чатбот
+        const response = await ChatbotService.processMessage(message, sessionId);
+        
+        // Сохраняем ответ бота
+        session.messages.push({
+            text: response,
+            sender: 'bot',
+            timestamp: new Date()
+        });
+
+        // Отправляем обновление операторам
+        this.io.emit('sessions', Object.fromEntries(this.sessions));
+
+        return response;
     }
-  }
 
-  async sendOperatorMessage(data) {
-    const { sessionId, message } = data;
-    const session = this.activeSessions.get(sessionId);
-    
-    if (session && session.isOperatorActive) {
-      await this.sendToChannel(session.channel, session.userId, message);
-      
-      session.messages.push({
-        from: 'operator',
-        text: message,
-        timestamp: Date.now()
-      });
-
-      try {
-        await DatabaseService.saveMessage(sessionId, 'operator', message);
-      } catch (error) {
-        console.error('Ошибка сохранения сообщения оператора:', error);
-      }
-      
-      this.io.emit('operatorMessageSent', { sessionId, message });
+    async sendToChannel(channel, sessionId, message, sender = 'bot') {
+        try {
+            switch (channel) {
+                case 'telegram':
+                    if (this.telegramService) {
+                        await this.telegramService.sendMessage(sessionId, message);
+                    }
+                    break;
+                case 'whatsapp':
+                    if (this.whatsappService) {
+                        await this.whatsappService.sendMessage(sessionId, message);
+                    }
+                    break;
+                case 'facebook':
+                    if (this.facebookService) {
+                        await this.facebookService.sendMessage(sessionId, message);
+                    }
+                    break;
+                case 'web':
+                    // Отправляем через Socket.IO
+                    this.io.to(sessionId).emit('message', {
+                        message: message,
+                        sender: sender,
+                        sessionId: sessionId
+                    });
+                    break;
+            }
+        } catch (error) {
+            console.error(`Ошибка отправки в канал ${channel}:`, error);
+        }
     }
-  }
 
-  returnToBot(sessionId) {
-    const session = this.activeSessions.get(sessionId);
-    if (session) {
-      session.isOperatorActive = false;
-      this.io.emit('sessionReturnedToBot', { sessionId });
-      console.log(`Сессия возвращена боту: ${sessionId}`);
+    async handleFacebookMessage(webhookEvent) {
+        const senderId = webhookEvent.sender.id;
+        const message = webhookEvent.message.text;
+
+        if (message) {
+            const response = await this.handleMessage(message, senderId);
+            await this.sendToChannel('facebook', senderId, response);
+        }
     }
-  }
 
-  async initializeServices() {
-    try {
-      console.log('Инициализация сервисов...');
-      
-      // Инициализация базы данных
-      await DatabaseService.initialize();
-      console.log('✅ База данных инициализирована');
-      
-      // Инициализация сервисов
-      //this.telegramService = new TelegramService();
-      //console.log('✅ Telegram сервис создан');
-      
-      this.whatsappService = new WhatsAppService();
-      console.log('✅ WhatsApp сервис создан');
-      
-      this.facebookService = new FacebookService();
-      console.log('✅ Facebook сервис создан');
-      
-      // Добавляем Facebook routes
-      this.app.use('/facebook', this.facebookService.getRouter());
-      
-      // Инициализация WhatsApp
-      //await this.whatsappService.initialize();
-      //console.log('✅ WhatsApp клиент инициализирован');
-      
-      // Инициализация Telegram канала
-      await TelegramChannelService.initialize();
-      console.log('✅ Telegram канал инициализирован');
-      
-      console.log('�� Все сервисы инициализированы успешно!');
-    } catch (error) {
-      console.error('❌ Ошибка инициализации сервисов:', error);
+    async initialize() {
+        try {
+            console.log('Инициализация сервисов...');
+
+            // Инициализация базы данных
+            await DatabaseService.initialize();
+            console.log('✅ База данных инициализирована');
+
+            // Инициализация сервисов
+            this.telegramService = new TelegramService();
+            console.log('✅ Telegram сервис создан');
+
+            // Временно отключаем WhatsApp для стабильной работы
+            // this.whatsappService = new WhatsAppService();
+            // await this.whatsappService.initialize();
+            // console.log('✅ WhatsApp клиент инициализирован');
+
+            this.facebookService = new FacebookService();
+            console.log('✅ Facebook сервис создан');
+
+            // Инициализация Telegram канала
+            this.telegramChannelService = new TelegramChannelService();
+            console.log('✅ Telegram канал инициализирован');
+
+            console.log('🎉 Все сервисы инициализированы успешно!');
+
+        } catch (error) {
+            console.error('Ошибка инициализации:', error);
+        }
     }
-  }
 
-  start() {
-    const PORT = process.env.PORT || 3000;
-    this.server.listen(PORT, () => {
-      console.log(`🚀 Сервер запущен на порту ${PORT}`);
-      console.log(`👨‍�� Панель оператора: http://localhost:${PORT}/operator`);
-      console.log(`�� Веб-чат: http://localhost:${PORT}/webchat`);
-    });
-  }
+    start() {
+        this.server.listen(this.port, () => {
+            console.log(`🚀 Сервер запущен на порту ${this.port}`);
+            console.log(`👨‍�� Панель оператора: http://localhost:${this.port}/operator`);
+            console.log(`💬 Веб-чат: http://localhost:${this.port}/webchat`);
+        });
+    }
 }
 
-// Запуск сервера
-const server = new CentralServer();
+// Создаем и запускаем приложение
+const app = new MultichannelChatbot();
 
-server.start();
+// Инициализируем и запускаем
+app.initialize().then(() => {
+    app.start();
+}).catch(error => {
+    console.error('Критическая ошибка:', error);
+    process.exit(1);
+});
+
+module.exports = MultichannelChatbot;
